@@ -4,3 +4,6 @@
 [submodule "lib/drips-contracts"]
 	path = lib/drips-contracts
 	url = https://github.com/drips-network/contracts
+[submodule "lib/solmate"]
+	path = lib/solmate
+	url = https://github.com/transmissions11/solmate

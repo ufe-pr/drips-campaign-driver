@@ -10,6 +10,7 @@ import {Strings} from "openzeppelin-contracts/utils/Strings.sol";
 import {NFTUtils, NFTStorage} from "./NFTUtils.sol";
 import {Common} from "./CommonLib.sol";
 import {MetadataUtils, MetadataStorage} from "./MetadataUtils.sol";
+import {IAccessControlChecker} from "./interfaces/IAccessControlChecker.sol";
 
 contract NFTCampaignDriver is DriverTransferUtils, Managed, NFTUtils, MetadataUtils {
     /// @notice The Drips address used by this driver.
@@ -115,7 +116,7 @@ contract NFTCampaignDriver is DriverTransferUtils, Managed, NFTUtils, MetadataUt
     /// @param balanceDelta The streams balance change to be applied.
     /// Positive to add funds to the streams balance, negative to remove them.
     /// @param newReceivers The list of the streams receivers of the sender to be set.
-    /// Must be sorted by the receivers' addresses, deduplicated and without 0 amtPerSecs.
+    /// Must be sorted by the receivers' addresses, without duplicate receiver account and without 0 amtPerSecs.
     /// @param maxEndHint1 An optional parameter allowing gas optimization, pass `0` to ignore it.
     /// The first hint for finding the maximum end time when all streams stop due to funds
     /// running out after the balance is updated and the new receivers list is applied.
@@ -167,5 +168,10 @@ contract NFTCampaignDriver is DriverTransferUtils, Managed, NFTUtils, MetadataUt
         drips.emitAccountMetadata(_callerAccountId(), accountMetadata);
     }
 
-
+    /// @notice Sets the contract to be used to check access rights for a driver ID.
+    /// @param driverId_ The driver ID to set the access checker for.
+    /// @param accessChecker The contract to use to check access rights for the driver ID.
+    function registerAccessChecker(uint32 driverId_, IAccessControlChecker accessChecker) public onlyAdmin {
+        _metadataStorage().driverIdToAccessControlVerifier[driverId_] = accessChecker;
+    }
 }

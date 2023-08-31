@@ -15,6 +15,7 @@ import {ManagedProxy} from "drips-contracts/Managed.sol";
 import {Test, console} from "forge-std/Test.sol";
 import {IERC20, ERC20PresetFixedSupply} from "openzeppelin-contracts/token/ERC20/presets/ERC20PresetFixedSupply.sol";
 import {ERC721TokenReceiver} from "solmate/tokens/ERC721.sol";
+import {IAccessControlChecker, AddressDriverAccessChecker} from "src/AccessCheckers.sol";
 
 contract NFTCampaignDriverTest is Test, ERC721TokenReceiver {
     Drips internal drips;
@@ -42,6 +43,11 @@ contract NFTCampaignDriverTest is Test, ERC721TokenReceiver {
         NFTCampaignDriver driverLogic = new NFTCampaignDriver(drips, address(caller), driverId);
         driver = NFTCampaignDriver(address(new ManagedProxy(driverLogic, admin)));
         drips.updateDriverAddress(driverId, address(driver));
+
+        // Register access checker
+        IAccessControlChecker accessChecker = new AddressDriverAccessChecker();
+        vm.prank(admin);
+        driver.registerAccessChecker(driverId, accessChecker);
 
         thisId = driver.calcAccountId(address(this));
         accountId = driver.calcAccountId(user);
@@ -170,5 +176,41 @@ contract NFTCampaignDriverTest is Test, ERC721TokenReceiver {
         skip(60);
         (isActive,) = driver.getTokenState(tokenId);
         assertFalse(isActive, "NFT should be inactive");
+    }
+
+    function testNFTIsInactiveWhenStreamIsRemoved() public {
+        uint256 tokenId = driver.calcTokenId(address(this), accountId, erc20);
+        // Top-up
+        StreamReceiver[] memory receivers = new StreamReceiver[](1);
+        receivers[0] = StreamReceiver(accountId, StreamConfigImpl.create(0, drips.minAmtPerSec(), 0, 0));
+
+        driver.setStreams(erc20, new StreamReceiver[](0), 5, receivers, 0, 0, address(this));
+        (bool isActive,) = driver.getTokenState(tokenId);
+        assertTrue(isActive, "NFT should be active");
+
+        // Remove stream
+        driver.setStreams(erc20, receivers, -5, new StreamReceiver[](0), 0, 0, address(this));
+        (isActive,) = driver.getTokenState(tokenId);
+        assertFalse(isActive, "NFT should be inactive");
+    }
+
+    function testOnlyAddressWithAccountAccessCanUpdateMetadata() public {
+        string memory imageURITemplate = "https://drips.network/path/to/image/{id}";
+        string memory externalUrl = "https://drips.network/path/to/docs";
+        string memory customData = "{}";
+
+        vm.expectRevert();
+        driver.setReceiverNFTConfig(accountId, imageURITemplate, externalUrl);
+        vm.expectRevert();
+        driver.setReceiverNFTConfigCustomData(accountId, customData);
+
+        driver.setReceiverNFTConfig(thisId, imageURITemplate, externalUrl);
+        driver.setReceiverNFTConfigCustomData(thisId, customData);
+
+        (string memory imageURI, string memory externalURI, string memory customData_) =
+            driver.getReceiverNFTConfig(thisId);
+        assertEq(imageURI, imageURITemplate, "Invalid image URI");
+        assertEq(externalURI, externalUrl, "Invalid external URI");
+        assertEq(customData_, customData, "Invalid custom data");
     }
 }

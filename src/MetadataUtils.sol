@@ -6,6 +6,7 @@ import {ERC2771Context} from "openzeppelin-contracts/metatx/ERC2771Context.sol";
 import {NFTStorage, TokenConfig, TokenState} from "./NFTUtils.sol";
 import {Common} from "./CommonLib.sol";
 import {MetadataJSONLib} from "./MetadataJSONLib.sol";
+import {IAccessControlChecker} from "./interfaces/IAccessControlChecker.sol";
 
 struct ReceiverNFTConfig {
     bytes imageURI;
@@ -15,6 +16,7 @@ struct ReceiverNFTConfig {
 
 struct MetadataStorage {
     mapping(uint256 => ReceiverNFTConfig) receiverNFTConfigs;
+    mapping(uint32 => IAccessControlChecker) driverIdToAccessControlVerifier;
 }
 
 abstract contract MetadataUtils is ERC2771Context {
@@ -22,9 +24,11 @@ abstract contract MetadataUtils is ERC2771Context {
         _requireAddressCanControlAccount(account, _msgSender());
         _;
     }
-    // TODO
 
-    function _addressCanControlAccount(uint256 account, address addr) private view returns (bool hasControl) {}
+    function _addressCanControlAccount(uint256 account, address addr) private view returns (bool hasControl) {
+        uint32 driverId = uint32(account >> 224);
+        hasControl = _metadataStorage().driverIdToAccessControlVerifier[driverId].canControlAccount(account, addr);
+    }
 
     function _requireAddressCanControlAccount(uint256 account, address addr) internal view {
         require(_addressCanControlAccount(account, addr), "Unauthorized");

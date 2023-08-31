@@ -14,8 +14,9 @@ import {
 import {ManagedProxy} from "drips-contracts/Managed.sol";
 import {Test, console} from "forge-std/Test.sol";
 import {IERC20, ERC20PresetFixedSupply} from "openzeppelin-contracts/token/ERC20/presets/ERC20PresetFixedSupply.sol";
+import {ERC721TokenReceiver} from "solmate/tokens/ERC721.sol";
 
-contract NFTCampaignDriverTest is Test {
+contract NFTCampaignDriverTest is Test, ERC721TokenReceiver {
     Drips internal drips;
     Caller internal caller;
     NFTCampaignDriver internal driver;
@@ -141,5 +142,33 @@ contract NFTCampaignDriverTest is Test {
         vm.warp(60);
         metadata = driver.tokenURI(tokenId);
         console.log(metadata);
+    }
+
+    function testNFTIsInactiveOutsideSuppportRange() public {
+        uint256 tokenId = driver.calcTokenId(address(this), accountId, erc20);
+        // Top-up
+        StreamReceiver[] memory receivers = new StreamReceiver[](1);
+        receivers[0] = StreamReceiver(accountId, StreamConfigImpl.create(0, drips.minAmtPerSec(), 0, 0));
+
+        driver.setStreams(erc20, new StreamReceiver[](0), 5, receivers, 0, 0, address(this));
+        (bool isActive,) = driver.getTokenState(tokenId);
+        assertTrue(isActive, "NFT should be active");
+        skip(60);
+        (isActive,) = driver.getTokenState(tokenId);
+        assertFalse(isActive, "NFT should be inactive");
+
+        // Change receiver configuration to start in the future
+        StreamReceiver[] memory newReceivers = new StreamReceiver[](1);
+        newReceivers[0] =
+            StreamReceiver(accountId, StreamConfigImpl.create(0, drips.minAmtPerSec(), uint32(block.timestamp + 60), 0));
+        driver.setStreams(erc20, receivers, 5, newReceivers, 0, 0, address(this));
+        (isActive,) = driver.getTokenState(tokenId);
+        assertFalse(isActive, "NFT should be inactive");
+        skip(60);
+        (isActive,) = driver.getTokenState(tokenId);
+        assertTrue(isActive, "NFT should be active");
+        skip(60);
+        (isActive,) = driver.getTokenState(tokenId);
+        assertFalse(isActive, "NFT should be inactive");
     }
 }

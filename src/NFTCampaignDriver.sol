@@ -6,20 +6,19 @@ import {Streams} from "drips-contracts/Streams.sol";
 import {DriverTransferUtils} from "drips-contracts/DriverTransferUtils.sol";
 import {Managed} from "drips-contracts/Managed.sol";
 import {ERC721} from "solmate/tokens/ERC721.sol";
-import {DriverLogic, NFTCampaignDriverStorage, TokenConfig, TokenState, ReceiverNFTConfig} from "./DriverLib.sol";
 import {Strings} from "openzeppelin-contracts/utils/Strings.sol";
-import {Metadata} from "./Metadata.sol";
+import {NFTUtils, NFTStorage} from "./NFTUtils.sol";
+import {Common} from "./CommonLib.sol";
+import {MetadataUtils, MetadataStorage} from "./MetadataUtils.sol";
 
-contract NFTCampaignDriver is ERC721, DriverTransferUtils, Managed, DriverLogic {
-
-    event Locked(uint256 tokenId);
-
+contract NFTCampaignDriver is DriverTransferUtils, Managed, NFTUtils, MetadataUtils {
     /// @notice The Drips address used by this driver.
     Drips public immutable drips;
     /// @notice The driver ID which this driver uses when calling Drips.
     uint32 public immutable driverId;
 
-    bytes32 private immutable _storageSlot = _erc1967Slot("eip1967.campaignNftDriver.storage");
+    bytes32 private immutable _nftStorageSlot = _erc1967Slot("eip1967.campaignNftDriver.nft.storage");
+    bytes32 private immutable _metadataStorageSlot = _erc1967Slot("eip1967.campaignNftDriver.metadata.storage");
 
     /// @param drips_ The Drips contract to use.
     /// @param forwarder The ERC-2771 forwarder to trust. May be the zero address.
@@ -38,6 +37,31 @@ contract NFTCampaignDriver is ERC721, DriverTransferUtils, Managed, DriverLogic 
     /// @notice Returns the address of the Drips contract to use for ERC-20 transfers.
     function _drips() internal view override returns (Drips) {
         return drips;
+    }
+
+    /// @notice Returns the driver ID to use when calling Drips.
+    function _driverId() internal view override returns (uint32) {
+        return driverId;
+    }
+
+    /// @notice Returns the CampaignNFTDriver storage.
+    /// @return storageRef The storage.
+    function _nftStorage() internal view override(NFTUtils, MetadataUtils) returns (NFTStorage storage storageRef) {
+        bytes32 slot = _nftStorageSlot;
+        // slither-disable-next-line assembly
+        assembly {
+            storageRef.slot := slot
+        }
+    }
+
+    /// @notice Returns the Metadata storage.
+    /// @return storageRef The storage.
+    function _metadataStorage() internal view override returns (MetadataStorage storage storageRef) {
+        bytes32 slot = _metadataStorageSlot;
+        // slither-disable-next-line assembly
+        assembly {
+            storageRef.slot := slot
+        }
     }
 
     /// @notice Calculates the account ID for an address.
@@ -60,31 +84,6 @@ contract NFTCampaignDriver is ERC721, DriverTransferUtils, Managed, DriverLogic 
     /// @return accountId The account ID
     function _callerAccountId() internal view returns (uint256 accountId) {
         return calcAccountId(_msgSender());
-    }
-
-    /// @notice Calculates the token ID for an address.
-    /// Every token ID is a 256-bit integer constructed by concatenating:
-    /// `driverId (32 bits) | accountHash (224 bits)`.
-    /// `accountHash` is the `keccak256` hash of (addr, receiverId, erc20).
-    /// @param addr The address
-    /// @param receiverId The receiver's account ID
-    /// @param erc20 The used ERC-20 token.
-    /// It must preserve amounts, so if some amount of tokens is transferred to
-    /// an address, then later the same amount must be transferable from that address.
-    /// Tokens which rebase the holders' balances, collect taxes on transfers,
-    /// or impose any restrictions on holding or transferring tokens are not supported.
-    /// If you use such tokens in the protocol, they can get stuck or lost.
-    /// @return tokenId The token ID
-    function calcTokenId(address addr, uint256 receiverId, IERC20 erc20) public view returns (uint256 tokenId) {
-        // By assignment we get `tokenId` value:
-        // `zeros (224 bits) | driverId (32 bits)`
-        tokenId = driverId;
-        // By bit shifting we get `tokenId` value:
-        // `driverId (32 bits) | zeros (224 bits)`
-        // By bit masking we get `tokenId` value:
-        // `driverId (32 bits) | accountHash (224 bits)`
-        uint224 accountHash = uint224(uint256(keccak256(abi.encodePacked(addr, receiverId, erc20))));
-        tokenId = (tokenId << 224) | accountHash;
     }
 
     /// @notice Collects the account's received already split funds
@@ -168,126 +167,5 @@ contract NFTCampaignDriver is ERC721, DriverTransferUtils, Managed, DriverLogic 
         drips.emitAccountMetadata(_callerAccountId(), accountMetadata);
     }
 
-    function _updateSupportStatus(address addr, uint256 accountId, IERC20 erc20, uint160 amtPerSec, uint32 end)
-        internal
-        override
-    {
-        uint256 tokenId = calcTokenId(addr, accountId, erc20);
-        TokenConfig storage tokenConfig = _driverStorage().tokenConfigs[tokenId];
-        if (tokenConfig.receiverId == 0) {
-            tokenConfig.receiverId = accountId;
-            tokenConfig.erc20 = erc20;
-            _mint(addr, tokenId);
-            emit Locked(tokenId);
-        }
 
-        if (tokenConfig.state.expiresAt != end || tokenConfig.state.amtPerSec != amtPerSec) {
-            tokenConfig.state = TokenState(amtPerSec, end);
-        }
-
-        emit SupportStatusChanged(addr, accountId, erc20, amtPerSec, end);
-    }
-
-    /// @notice Returns the CampaignNFTDriver storage.
-    /// @return storageRef The storage.
-    function _driverStorage() internal view override returns (NFTCampaignDriverStorage storage storageRef) {
-        bytes32 slot = _storageSlot;
-        // slither-disable-next-line assembly
-        assembly {
-            storageRef.slot := slot
-        }
-    }
-
-    // Prevent token transfers
-    function transferFrom(address from, address to, uint256 tokenId) public override {
-        require(from == address(0) || to == address(0), "NFT transfers are not allowed");
-
-        super.transferFrom(from, to, tokenId);
-    }
-
-    // **************************************************
-    // ********** Metadata functions ********************
-    // **************************************************
-
-    // TODO
-    function _addressCanControlAccount(uint256 account, address addr) private view returns (bool hasControl) {}
-
-    function _requireAddressCanControlAccount(uint256 account, address addr) internal view {
-        require(_addressCanControlAccount(account, addr), "Unauthorized");
-    }
-
-    modifier onlyAccountController(uint256 account) {
-        _requireAddressCanControlAccount(account, _msgSender());
-        _;
-    }
-
-    function getTokenInfo(uint256 tokenId) public view returns (uint256 receiverId, IERC20 erc20) {
-        TokenConfig storage tokenConfig = _driverStorage().tokenConfigs[tokenId];
-        receiverId = tokenConfig.receiverId;
-        erc20 = tokenConfig.erc20;
-    }
-
-    function getTokenState(uint256 tokenId) public view returns (bool isActive, uint160 amtPerSec, uint32 expiresAt) {
-        TokenConfig storage tokenConfig = _driverStorage().tokenConfigs[tokenId];
-        TokenState storage tokenState = tokenConfig.state;
-        expiresAt = tokenState.expiresAt;
-        amtPerSec = tokenState.amtPerSec;
-        isActive = expiresAt > _currTimestamp();
-    }
-
-    function getReceiverNFTConfig(uint256 receiverId)
-        public
-        view
-        returns (string memory imageURI, string memory externalURI, string memory customData)
-    {
-        ReceiverNFTConfig storage receiverNFTConfig = _driverStorage().receiverNFTConfigs[receiverId];
-        imageURI = string(receiverNFTConfig.imageURI);
-        externalURI = string(receiverNFTConfig.externalURI);
-        customData = string(receiverNFTConfig.customData);
-    }
-
-    function setReceiverNFTConfig(uint256 receiverId, string calldata imageURITemplate, string calldata externalUrl)
-        public
-        onlyAccountController(receiverId)
-    {
-        ReceiverNFTConfig storage receiverNFTConfig = _driverStorage().receiverNFTConfigs[receiverId];
-        receiverNFTConfig.imageURI = bytes(imageURITemplate);
-        receiverNFTConfig.externalURI = bytes(externalUrl);
-    }
-
-    function setReceiverNFTConfigCustomData(uint256 receiverId, string calldata customData)
-        public
-        onlyAccountController(receiverId)
-    {
-        ReceiverNFTConfig storage receiverNFTConfig = _driverStorage().receiverNFTConfigs[receiverId];
-        receiverNFTConfig.customData = bytes(customData);
-    }
-
-    function _buildMetadataJson(uint256 tokenId) private view returns (string memory output) {
-        (uint256 receiverId, IERC20 erc20) = getTokenInfo(tokenId);
-        (bool isActive, uint160 amtPerSec, uint32 expiresAt) = getTokenState(tokenId);
-
-        ReceiverNFTConfig memory receiverNFTConfig = _driverStorage().receiverNFTConfigs[receiverId];
-
-        if (bytes(receiverNFTConfig.imageURI).length == 0) {
-            // TODO: Use an actual default image
-            receiverNFTConfig.imageURI = bytes(string("https://drips.network/path/to/image/{id}"));
-        }
-        if (bytes(receiverNFTConfig.externalURI).length != 0) {
-            receiverNFTConfig.externalURI = bytes(string("https://drips.network/path/to/docs"));
-        }
-
-        {
-            output = Metadata.buildMetadtaURI(
-                receiverId,
-                address(erc20),
-                isActive,
-                amtPerSec,
-                expiresAt,
-                receiverNFTConfig.imageURI,
-                receiverNFTConfig.externalURI,
-                receiverNFTConfig.customData
-            );
-        }
-    }
 }

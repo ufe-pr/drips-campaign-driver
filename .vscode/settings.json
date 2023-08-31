@@ -7,4 +7,5 @@
     },
     "solidity.formatter": "forge",
     "solidity.defaultCompiler": "remote",
+    "solidity.monoRepoSupport": false,
 }

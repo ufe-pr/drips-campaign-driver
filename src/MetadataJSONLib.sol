@@ -4,7 +4,7 @@ pragma solidity 0.8.21;
 import {Strings} from "openzeppelin-contracts/utils/Strings.sol";
 import {Base64} from "openzeppelin-contracts/utils/Base64.sol";
 
-library Metadata {
+library MetadataJSONLib {
     function _boolToBytes(bool value) private pure returns (bytes memory) {
         return bytes(abi.encodePacked(value ? "true" : "false"));
     }
@@ -14,7 +14,6 @@ library Metadata {
         address erc20,
         bool isActive,
         uint256 amtPerSec,
-        uint32 expiresAt,
         bytes memory imageURI,
         bytes memory externalURI,
         bytes memory customData
@@ -44,9 +43,7 @@ library Metadata {
                     string(_boolToBytes(isActive)),
                     '},{"trait_type":"Support rate","value":',
                     Strings.toString(amtPerSec),
-                    '},{"trait_type":"Expire", "display_type": "date","value":',
-                    Strings.toString(expiresAt),
-                    '}],',
+                    "}],",
                     '"customData":"',
                     string(customData),
                     '"}'
@@ -62,13 +59,12 @@ library Metadata {
         address erc20,
         bool isActive,
         uint256 amtPerSec,
-        uint32 expiresAt,
         bytes memory imageURI,
         bytes memory externalURI,
         bytes memory customData
     ) internal pure returns (string memory output) {
         bytes memory metadata =
-            _formatMetadataJson(receiverId, erc20, isActive, amtPerSec, expiresAt, imageURI, externalURI, customData);
+            _formatMetadataJson(receiverId, erc20, isActive, amtPerSec, imageURI, externalURI, customData);
         bytes memory metadataURI = abi.encodePacked("data:application/json;base64,", Base64.encode(metadata));
         return string(metadataURI);
     }
